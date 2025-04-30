@@ -8,8 +8,8 @@
 #include <iostream>
 #include <vector>
 
-NeuralNetwork::NeuralNetwork(int input_size, float learning_rate)
-    : input_size(input_size), learning_rate(learning_rate),
+NeuralNetwork::NeuralNetwork(int input_size)
+    : input_size(input_size),
       inputs(Matrix::fromVector(std::vector<float>(input_size))) {}
 
 void NeuralNetwork::setInputs(const std::vector<float> &input_vector) {
@@ -59,26 +59,69 @@ Matrix NeuralNetwork::predict() {
 }
 
 void NeuralNetwork::train(
-    const std::vector<std::vector<std::vector<float>>> samples, int epochs) {
-  auto shuffled_samples = samples;
-  for (int i = 0; i < epochs; i++) {
-    std::shuffle(shuffled_samples.begin(), shuffled_samples.end(), global_rng());
+    const std::vector<std::vector<float>> training_inputs,
+    const std::vector<std::vector<float>> training_targets, int batch_size,
+    int epochs, float learning_rate) {
+  this->learning_rate = learning_rate;
 
-    for (auto sample : shuffled_samples) {
-      setInputs(sample.at(0));
-      predict();
-      Matrix targetMatrix = Matrix::fromVector(sample.at(1));
-      backpropagate(targetMatrix);
+  std::vector<std::vector<std::vector<float>>> samples;
+  for (int i = 0; i < training_inputs.size(); i++) {
+    std::vector<std::vector<float>> sample;
+    sample.push_back(training_inputs.at(i));
+    sample.push_back(training_targets.at(i));
+    samples.push_back(sample);
+  }
+
+  for (int epoch = 0; epoch < epochs; epoch++) {
+    std::shuffle(samples.begin(), samples.end(), global_rng());
+
+    for (int batch_start_index = 0; batch_start_index < samples.size();
+         batch_start_index += batch_size) {
+
+      std::vector<std::vector<std::vector<float>>> batch_samples(
+          samples.begin() + batch_start_index,
+          samples.begin() +
+              std::min(batch_start_index + batch_size, (int)samples.size()));
+
+      Matrix batch_inputs = Matrix(input_size, 1);
+      Matrix batch_targets =
+          Matrix(layers.at(layers.size() - 1).output_size, 1);
+      std::vector<Matrix> batch_outputs;
+
+      for (int i = 0; i < layers.size(); i++) {
+        batch_outputs.push_back(Matrix(layers.at(i).output_size, 1));
+      }
+
+      for (int sample = 0; sample < batch_samples.size(); sample++) {
+        setInputs(batch_samples.at(sample).at(0));
+        batch_inputs = Matrix::add(batch_inputs, inputs);
+        Matrix targetMatrix =
+            Matrix::fromVector(batch_samples.at(sample).at(1));
+        batch_targets = Matrix::add(batch_targets, targetMatrix);
+        predict();
+        for (int i = 0; i < layers.size(); i++) {
+          batch_outputs.at(i) =
+              Matrix::add(batch_outputs.at(i), layers.at(i).a);
+        }
+      }
+
+      for (int i = 0; i < layers.size(); i++) {
+        batch_outputs.at(i).applyFunction(
+            [&batch_samples](float n) { return n / batch_samples.size(); });
+      }
+      batch_inputs.applyFunction(
+          [&batch_samples](float n) { return n / batch_samples.size(); });
+      batch_targets.applyFunction(
+          [&batch_samples](float n) { return n / batch_samples.size(); });
+
+      backpropagate(batch_inputs, batch_targets, batch_outputs);
     }
   }
 }
 
-void NeuralNetwork::backpropagate(Matrix &targets) {
-  Matrix loss = Matrix::subtract(layers.at(layers.size() - 1).a, targets);
-
-  // std::cout << std::endl << "o - t:" << std::endl;
-  // loss.print();
-
+void NeuralNetwork::backpropagate(Matrix &inputs, Matrix &targets,
+                                  std::vector<Matrix> &outputs) {
+  Matrix loss = Matrix::subtract(outputs.at(layers.size() - 1), targets);
   loss.applyFunction([](float n) { return n * n; });
 
   Matrix dE_dA(0, 0);
@@ -89,44 +132,25 @@ void NeuralNetwork::backpropagate(Matrix &targets) {
   for (int i = layers.size() - 1; i >= 0; i--) {
 
     if (i == layers.size() - 1) {
-      dE_dA = Matrix::subtract(layers.at(i).a, targets);
+      dE_dA = Matrix::subtract(outputs.at(i), targets);
       dE_dA.applyFunction([](float n) { return 2 * n; });
     } else {
       dE_dA = Matrix::multiply(Matrix::transpose(layers.at(i + 1).weights),
                                next_layer_dE_dZ);
     }
 
-    // std::cout << std::endl << "dE_dA:" << std::endl;
-    // dE_dA.print();
-
     Matrix dA_dZ = layers.at(i).d_activate();
-
-    // std::cout << std::endl << "dA_dZ:" << std::endl;
-    // dA_dZ.print();
-
     Matrix dE_dZ = Matrix::multiplyElementwise(dE_dA, dA_dZ);
 
-    // std::cout << std::endl << "dE_dZ:" << std::endl;
-    // dE_dZ.print();
-
     Matrix dZ_dW = i == 0 ? Matrix::transpose(inputs)
-                          : Matrix::transpose(layers.at(i - 1).a);
+                          : Matrix::transpose(outputs.at(i - 1));
     Matrix dE_dW = Matrix::multiply(dE_dZ, dZ_dW);
-
-    // std::cout << std::endl << "dE_dW:" << std::endl;
-    // dE_dW.print();
 
     Matrix delta_w = dE_dW;
     delta_w.applyFunction([this](float n) { return n * -learning_rate; });
 
-    // std::cout << std::endl << "dW:" << std::endl;
-    // delta_w.print();
-
     Matrix delta_b = dE_dZ;
     delta_b.applyFunction([this](float n) { return n * -learning_rate; });
-
-    // std::cout << std::endl << "dB:" << std::endl;
-    // delta_b.print();
 
     if (i + 1 < layers.size()) {
       layers.at(i + 1).weights =

@@ -4,20 +4,26 @@
 #include <iostream>
 
 int main(int argc, char *argv[]) {
-  NeuralNetwork nn(2, 0.001f);
+  NeuralNetwork nn(2);
   nn.addLayer(16, relu, d_relu, he);
   nn.addLayer(16, relu, d_relu, he);
   nn.addLayer(1, none, d_none, randomize);
 
-  const std::vector<std::vector<std::vector<float>>> samples = {
-      {{0, 0}, {0}},
-      {{0, 1}, {1}},
-      {{1, 0}, {1}},
-      {{1, 1}, {0}},
+  std::vector<std::vector<float>> inputs = {
+      {0, 0},
+      {0, 1},
+      {1, 0},
+      {1, 1},
   };
 
-  nn.train(samples, 10000);
+  std::vector<std::vector<float>> targets = {
+      {0},
+      {1},
+      {1},
+      {0},
+  };
 
+  nn.train(inputs, targets, 2, 10000);
   nn.test();
 
   std::cout << std::endl << std::endl << "XOR:" << std::endl;
